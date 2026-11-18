@@ -1,0 +1,45 @@
+# Out-of-tree build output (recommended for new binaries)
+/build/
+/cmake-build-*/
+
+# Current executable targets (extensionless Linux binaries)
+/example/Any
+/example/testtimer
+/source/Main
+
+# Compiler and linker artifacts
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dll
+*.dylib
+*.exe
+*.out
+*.d
+*.gch
+*.pch
+
+# Coverage / profiling output
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+
+# CMake generated files (keep CMakeLists.txt and Makefile tracked)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
