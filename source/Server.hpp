@@ -7,6 +7,34 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
+#include <unistd.h>
+
+#include <netinet/in.h> // 结构体
+#include <arpa/inet.h> // 字节序
+#include <sys/socket.h> // 套接字
+#include <fcntl.h>
+
+
+#define INF 0
+#define DBG 1
+#define ERR 2
+#define LOG_LEVEL DBG
+
+#define LOG(level,format, ...) \
+do\
+{\
+    if(level < LOG_LEVEL) break;\
+    time_t t = time(0);\
+    struct tm* ltm = localtime(&t);\
+    char tmp[32] = {0};\
+    strftime(tmp, 32, "%H:%M:%S", ltm);\
+    fprintf(stdout, "[%s %s:%d]" format "\n", tmp, __FILE__, __LINE__, ##__VA_ARGS__);\
+}while(0)
+
+#define INF_LOG(format, ...) LOG(INF, format, ##__VA_ARGS__)
+#define DBG_LOG(format, ...) LOG(DBG, format, ##__VA_ARGS__)
+#define ERR_LOG(format, ...) LOG(ERR, format, ##__VA_ARGS__)
+
 
 
 #define BUFFER_DEFAULT_SIZE 1024
@@ -199,4 +227,194 @@ private:
     std::vector<char> _buffer;// vector 空间管理
     uint64_t _readIdx; // 读偏移
     uint64_t _writeIdx; // 写偏移
+};
+
+
+#define MAX_LISTEN 1024
+
+class Socket
+{
+public:
+    Socket():_sockfd(-1) {}
+    Socket(int sockfd):_sockfd(sockfd){}
+    ~Socket(){ Close(); }
+
+    //创建套接字
+    bool Create()
+    {
+        // int socket(int domain, int type, int protoal
+        _sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if(_sockfd < 0)
+        {
+            ERR_LOG("CREATE SOCKET FAILED");
+            return false;
+        }
+        return true;
+    }
+    //绑定地址信息
+    bool Bind(const std::string& ip, uint16_t port)
+    {
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+
+        addr.sin_addr.s_addr = inet_addr(ip.c_str());
+        socklen_t len = sizeof(addr);
+
+        // int bind (int sockfd, struct sockaddr* addr, socklen_t len)
+        int ret = bind(_sockfd, (struct sockaddr*) &addr, len);
+        if(ret < 0)
+        {
+            ERR_LOG("BIND SOCKET FAILED");
+            return false;
+        }
+        return true;
+    }
+
+
+    //开始监听
+    bool Listen(int backlog = MAX_LISTEN)
+    {
+        //不限制总数 限制某一时间的并发链接数
+        int ret = listen(_sockfd, backlog);
+        if(ret < 0)
+        {
+            ERR_LOG("Listen SOCKET FAILED");
+            return false;
+        }
+        return true;
+    }
+
+    //向服务器发起连接
+    bool Connect(const std::string& ip, uint16_t port)
+    {
+        // int connect(int sockfd, struct sockaddr* addr, socklen_t len)
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+
+        addr.sin_addr.s_addr = inet_addr(ip.c_str());
+        socklen_t len = sizeof(addr);
+
+        // int bind (int sockfd, struct sockaddr* addr, socklen_t len)
+        int ret = connect(_sockfd, (struct sockaddr*) &addr, len);
+        if(ret < 0)
+        {
+            ERR_LOG("CONNECR SERVER FAILED");
+            return false;
+        }
+        return true;
+    
+    
+    }
+
+    //获取新连接
+    int Accept()
+    {
+        int newfd = accept(_sockfd, NULL, NULL);
+        if(newfd < 0)
+        {
+            ERR_LOG("ACCEPT FAILED");
+            return false;
+        }
+
+        return newfd;
+    }
+
+    //接收数据
+    ssize_t Recv(void* buf, size_t len, int flag = 0)
+    {
+        // ssize recv (_sockfd, buf, size_t len, int flag);
+        ssize_t ret = recv(_sockfd, buf, len, flag);
+        if(ret <= 0)
+        {
+            if(errno == EAGAIN || errno == EINTR)
+            {
+                return 0;
+            }
+            ERR_LOG("SOCKET RECV FAILED");
+            return -1;
+        }
+
+        return ret;
+    }
+
+    //发送数据
+    ssize_t Send(const void* buf, size_t len, int flag = 0)
+    {
+        // Send ()
+        ssize_t ret = send(_sockfd, buf, len, flag);
+        if(ret < 0)
+        {
+            ERR_LOG("SOCKET SEND FAILED");
+            return -1;
+        }
+
+        return ret; //实际发送的数据长度 外界根据这个长度来决定如何处理
+    }
+
+    ssize_t NonBlockRecv(void* buf, size_t len)
+    {
+        return Recv(buf, len, MSG_DONTWAIT);
+    }
+    ssize_t NonBlockSend(void* buf, size_t len)
+    {
+        return Send(buf, len, MSG_DONTWAIT);
+    }
+    
+
+    //关闭套接字
+    void Close()
+    {
+        if(_sockfd != -1)
+        {
+            close(_sockfd);
+            _sockfd = -1;
+        }
+    }
+    //创建一个服务端连接
+    bool CreateServer(uint16_t port, const std::string& ip = "0.0.0.0", bool flag = false)
+    {
+        //1. 创建套接字， 2.绑定地址， 3.开始监听 4.设置非阻塞， 5.启动地址重用
+        if(!Create()) return false;
+        if(flag)NonBlock();
+        
+        if(!Bind(ip, port)) return false;   
+    
+        if(!Listen()) return false;
+
+        
+        ReuserAddress();
+        return true;
+    }
+    //创建一个客户端连接
+    bool CreateClient(uint16_t port, const std::string& ip)
+    {
+        //1.创建套接字, 2.链接服务器  不用手动绑定端口
+        //
+        if(!Create()) return false;
+        if(!Connect(ip, port)) return false;
+
+        return true;
+    }
+    //设置套接字选项开启地址端口重用
+    void ReuserAddress()
+    {
+        //setsockopt  设置套接字选项
+        // int fd, int level, int optname, void* val, int vallen
+        int val = 1;
+        setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR, (void*)&val, sizeof val);
+        val = 1;
+        setsockopt(_sockfd, SOL_SOCKET, SO_REUSEPORT, (void*)&val, sizeof val);
+    
+    }
+    //设置套接字阻塞属性设置为非阻塞
+    void NonBlock()
+    {
+        int flag = fcntl(_sockfd, F_GETFL, 0);
+        fcntl(_sockfd, F_SETFL, flag | O_NONBLOCK);
+    }
+
+private:
+    int _sockfd;
 };
