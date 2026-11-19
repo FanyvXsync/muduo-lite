@@ -6,6 +6,7 @@
 #include <string>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 
 
 #define BUFFER_DEFAULT_SIZE 1024
